@@ -117,7 +117,7 @@ module Megrez
           next if thread == Thread.current
 
           thread.kill unless thread.join(1)
-          thread.join
+          thread.join(1)
         end
       end
       nil
@@ -157,7 +157,7 @@ module Megrez
       return if @process.join(1)
 
       Process.kill("KILL", @process.pid)
-      @process.join
+      @process.join(1)
     rescue Errno::ESRCH, Errno::ECHILD
       nil
     end
