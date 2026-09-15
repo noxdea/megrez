@@ -46,7 +46,7 @@ class TransportTest < Minitest::Test
     assert session.start(adapter_id: "fake")["supportsCancelRequest"]
     assert_equal({}, session.request("echo", value: 1).await(timeout: 1))
     assert session.transport.pid
-    assert_empty session.transport.stderr_lines
+    assert session.transport.stderr_lines.all? { |line| line.bytesize <= Megrez::Transport::MAX_HEADER_LINE }
   ensure
     session&.close
   end

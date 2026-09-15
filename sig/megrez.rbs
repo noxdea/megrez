@@ -1,4 +1,208 @@
 module Megrez
   VERSION: String
-  # See the writing guide of rbs: https://github.com/ruby/rbs#guides
+
+  type json = nil | bool | Integer | Float | String | Array[json] | Hash[String | Symbol, json]
+  type object = Hash[String | Symbol, json]
+  type state = :initialized | :configuring | :running | :stopped | :terminated
+
+  class Error < StandardError
+  end
+
+  class Timeout < Error
+  end
+
+  class Cancelled < Error
+  end
+
+  class AdapterError < Error
+    attr_reader command: String
+    attr_reader body: object?
+    def initialize: (String command, String message, ?object? body) -> void
+  end
+
+  class Breakpoint
+    attr_reader id: Integer?
+    attr_reader verified: bool
+    attr_reader source: object?
+    attr_reader line: Integer?
+    attr_reader column: Integer?
+    attr_reader message: String?
+    def self.new: (Integer?, bool, object?, Integer?, Integer?, String?) -> Breakpoint
+                | (id: Integer?, verified: bool, source: object?, line: Integer?, column: Integer?, message: String?) -> Breakpoint
+    def with: (?id: Integer?, ?verified: bool, ?source: object?, ?line: Integer?, ?column: Integer?, ?message: String?) -> Breakpoint
+  end
+
+  class SourceBreakpoint
+    attr_reader line: Integer
+    attr_reader column: Integer?
+    attr_reader condition: String?
+    attr_reader hit_condition: String?
+    attr_reader log_message: String?
+    def self.new: (Integer, Integer?, String?, String?, String?) -> SourceBreakpoint
+                | (line: Integer, column: Integer?, condition: String?, hit_condition: String?, log_message: String?) -> SourceBreakpoint
+    def with: (?line: Integer, ?column: Integer?, ?condition: String?, ?hit_condition: String?, ?log_message: String?) -> SourceBreakpoint
+  end
+
+  class StackFrame
+    attr_reader id: Integer
+    attr_reader name: String
+    attr_reader source: object?
+    attr_reader line: Integer
+    attr_reader column: Integer
+    attr_reader presentation_hint: String?
+    def self.new: (Integer, String, object?, Integer, Integer, String?) -> StackFrame
+                | (id: Integer, name: String, source: object?, line: Integer, column: Integer, presentation_hint: String?) -> StackFrame
+    def with: (?id: Integer, ?name: String, ?source: object?, ?line: Integer, ?column: Integer, ?presentation_hint: String?) -> StackFrame
+  end
+
+  class Scope
+    attr_reader name: String
+    attr_reader variables_reference: Integer
+    attr_reader expensive: bool
+    attr_reader presentation_hint: String?
+    def self.new: (String, Integer, bool, String?) -> Scope
+                | (name: String, variables_reference: Integer, expensive: bool, presentation_hint: String?) -> Scope
+    def with: (?name: String, ?variables_reference: Integer, ?expensive: bool, ?presentation_hint: String?) -> Scope
+  end
+
+  class Variable
+    attr_reader name: String
+    attr_reader value: String
+    attr_reader type: String?
+    attr_reader variables_reference: Integer
+    attr_reader named_count: Integer?
+    attr_reader indexed_count: Integer?
+    attr_reader memory_reference: String?
+    def self.new: (String, String, String?, Integer, Integer?, Integer?, String?) -> Variable
+                | (name: String, value: String, type: String?, variables_reference: Integer, named_count: Integer?, indexed_count: Integer?, memory_reference: String?) -> Variable
+    def with: (?name: String, ?value: String, ?type: String?, ?variables_reference: Integer, ?named_count: Integer?, ?indexed_count: Integer?, ?memory_reference: String?) -> Variable
+  end
+
+  class ThreadInfo
+    attr_reader id: Integer
+    attr_reader name: String
+    def self.new: (Integer, String) -> ThreadInfo
+                | (id: Integer, name: String) -> ThreadInfo
+    def with: (?id: Integer, ?name: String) -> ThreadInfo
+  end
+
+  module Protocol
+    MAX_COLLECTION: Integer
+    MAX_DEPTH: Integer
+    def self.validate_message: (untyped message) -> object
+    def self.validate_outbound: [A] (A value) -> A
+    def self.validate_json: (json value, Integer depth) -> void
+    def self.object: (untyped value, String name) -> object
+    def self.collection: [A] (untyped value, String name) -> Array[A]
+    def self.string: (untyped value, String name, ?empty: bool, ?max: Integer) -> String
+    def self.integer: (untyped value, String name) -> Integer
+    def self.uint: (untyped value, String name, ?positive: bool) -> Integer
+    def self.boolean: (untyped value, String name) -> bool
+    def self.optional_string: (untyped value, String name, ?empty: bool, ?max: Integer) -> String?
+    def self.optional_uint: (untyped value, String name) -> Integer?
+    def self.deep_freeze: [A] (A value) -> A
+  end
+
+  class Future
+    class Subscription
+      def initialize: () { () -> untyped } -> void
+      def detach: () -> untyped
+    end
+    attr_reader id: Integer
+    attr_reader callback_errors: Array[Error]
+    def initialize: (Integer id, ?on_error: ^(Error) -> untyped) ?{ (Integer) -> untyped } -> void
+    def fulfill: (?untyped value, ?error: Exception?) -> Future?
+    def then: () { (untyped, Exception?) -> untyped } -> Future
+    def on_complete: () { (untyped, Exception?) -> untyped } -> Subscription
+    def done?: () -> bool
+    def await: (?timeout: Numeric?) -> untyped
+    def cancel: () -> bool
+  end
+
+  class Transport
+    MAX_MESSAGE: Integer
+    MAX_HEADER_LINE: Integer
+    MAX_HEADERS: Integer
+    attr_reader stderr_lines: Array[String]
+    attr_reader pid: Integer?
+    def self.stdio: (command: Array[String], ?env: Hash[String, String?], ?cwd: String?) -> Transport
+    def self.tcp: (host: String, port: Integer, ?connect_timeout: Numeric) -> Transport
+    def self.valid_environment?: (untyped env) -> bool
+    def self.read_message: (IO | StringIO io) -> object?
+    def self.frame: (object message) -> String
+    def initialize: (IO input, IO output, ?process: Process::Waiter?, ?stderr: IO?, ?closeables: Array[IO]) -> void
+    def listen: () { (object?, Exception?) -> untyped } -> Transport
+    def write: (object message) -> nil
+    def alive?: () -> bool
+    def close: () -> nil
+  end
+
+  class Session
+    attr_reader transport: Transport
+    def self.stdio: (command: Array[String], ?env: Hash[String, String?], ?cwd: String?, ?dispatch: ^() { () -> untyped } -> untyped) -> Session
+    def self.tcp: (host: String, port: Integer, ?dispatch: ^() { () -> untyped } -> untyped, ?connect_timeout: Numeric) -> Session
+    def initialize: (Transport transport, ?dispatch: ^() { () -> untyped } -> untyped) -> void
+    def start: (adapter_id: String, ?lines_start_at_1: bool, ?columns_start_at_1: bool, ?path_format: String, ?timeout: Numeric) -> Hash[String, json]
+    def request: (String | Symbol command, ?object arguments) -> Future
+    def on: (String | Symbol event) { (object body) -> untyped } -> Proc
+    def on_request: (String | Symbol command) { (object arguments) -> object? } -> Proc
+    def capabilities: () -> Hash[String, json]
+    def state: () -> state
+    def generation: () -> Integer
+    def errors: () -> Array[Error]
+    def close: () -> nil
+
+    def launch: (object configuration) -> Future
+    def attach: (object configuration) -> Future
+    def configuration_done: () -> Future
+    def disconnect: (?terminate: bool, ?restart: bool) -> Future
+    def set_breakpoints: (String source_path, Array[SourceBreakpoint] breakpoints) -> Future
+    def set_function_breakpoints: (Array[String] names) -> Future
+    def set_exception_breakpoints: (Array[String] filters, ?options: Array[object]) -> Future
+    def set_data_breakpoints: (Array[object] descriptors) -> Future
+    def continue: (Integer thread_id, ?all: bool) -> Future
+    def step_over: (Integer thread_id, ?granularity: :statement | :line | :instruction) -> Future
+    def step_in: (Integer thread_id, ?target_id: Integer?) -> Future
+    def step_out: (Integer thread_id) -> Future
+    def pause: (Integer thread_id) -> Future
+    def restart_frame: (Integer frame_id) -> Future
+    def restart: (?object arguments) -> Future
+    def terminate: () -> Future
+    def threads: () -> Future
+    def stack_trace: (Integer thread_id, ?start: Integer, ?levels: Integer) -> Future
+    def scopes: (Integer frame_id) -> Future
+    def variables: (Integer reference, ?start: Integer?, ?count: Integer?, ?filter: (:indexed | :named)?) -> Future
+    def set_variable: (Integer reference, String name, String value) -> Future
+    def set_expression: (String expression, String value, ?frame_id: Integer?) -> Future
+    def evaluate: (String expression, ?frame_id: Integer?, ?context: String) -> Future
+    def completions: (String text, Integer column, ?frame_id: Integer?) -> Future
+    def source: (Integer reference) -> Future
+  end
+
+  module Testing
+    class FakeAdapter
+      DEFAULT_CAPABILITIES: Hash[String, json]
+      attr_reader messages: Array[object]
+      def self.command: () -> Array[String]
+      def self.run_stdio: () -> untyped
+      def initialize: (?responses: Hash[String | Symbol, untyped], ?capabilities: Hash[String, json], ?variable_count: Integer) -> void
+      def transport: () -> FakeTransport
+      def attach: () { (Array[object]) -> untyped } -> Proc
+      def detach: (Proc sink) -> untyped
+      def emit: (String | Symbol event, ?object body) -> object
+      def request_client: (String | Symbol command, ?object arguments) -> object
+      def dispatch: (object message) -> Array[object]
+      def serve: (IO input, ?IO output) -> untyped
+    end
+
+    class FakeTransport < Transport
+      attr_reader stderr_lines: Array[String]
+      attr_reader pid: Integer
+      def initialize: (FakeAdapter adapter) ?{ (object?, Exception?) -> untyped } -> void
+      def listen: () { (object?, Exception?) -> untyped } -> FakeTransport
+      def write: (object message) -> nil
+      def alive?: () -> bool
+      def close: () -> nil
+    end
+  end
 end

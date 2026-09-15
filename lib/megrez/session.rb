@@ -3,10 +3,11 @@
 module Megrez
   class Session
     MAX_PENDING = 1024
+    MAX_INBOUND = 1024
     MAX_ERRORS = 100
     STOP = Object.new.freeze
     Pending = Struct.new(:future, :command, :validate, keyword_init: true)
-    private_constant :MAX_PENDING, :MAX_ERRORS, :STOP, :Pending
+    private_constant :MAX_PENDING, :MAX_INBOUND, :MAX_ERRORS, :STOP, :Pending
 
     def self.stdio(command:, env: {}, cwd: nil, dispatch: ->(&block) { block.call })
       new(Transport.stdio(command: command, env: env, cwd: cwd), dispatch: dispatch)
@@ -37,7 +38,7 @@ module Megrez
       @started = false
       @closing = false
       @capabilities = {}.freeze
-      @inbound = Queue.new
+      @inbound = SizedQueue.new(MAX_INBOUND)
       @dispatcher = Thread.new { dispatch_messages }
       @dispatcher.report_on_exception = false
       @transport.listen { |message, error| enqueue(message, error) }
@@ -121,10 +122,11 @@ module Megrez
       end
       return nil unless pending
 
-      @transport&.close
       error = Error.new("debug session closed")
       pending.each { |future| future.fulfill(error: error) }
+      @inbound&.clear
       @inbound&.push(STOP)
+      @transport&.close
       if @dispatcher && @dispatcher != Thread.current
         @dispatcher.kill unless @dispatcher.join(1)
         @dispatcher.join
@@ -173,7 +175,11 @@ module Megrez
         @state = to
         old
       end
-      send_request(command, arguments, states: [to], &validate)
+      future = send_request(command, arguments, states: [to], &validate)
+      future.then do |_value, error|
+        @lock.synchronize { @state = previous if error && @state == to }
+      end
+      future
     rescue StandardError
       @lock.synchronize { @state = previous if previous && @state == to }
       raise
@@ -232,6 +238,7 @@ module Megrez
     def process_message(message, error)
       return fail_connection(error) if error
 
+      Protocol.validate_message(message)
       case message["type"]
       when "response" then process_response(message)
       when "event" then process_event(message)
@@ -258,7 +265,8 @@ module Megrez
       end
       unless message["success"]
         text = message["message"] || "debug adapter rejected #{pending.command}"
-        return pending.future.fulfill(error: AdapterError.new(pending.command, text, message["body"]))
+        body = message["body"]&.then { |value| Protocol.deep_freeze(value.dup) }
+        return pending.future.fulfill(error: AdapterError.new(pending.command, text, body))
       end
 
       body = message.fetch("body", {})
@@ -341,7 +349,9 @@ module Megrez
     end
 
     def record_error(error)
-      bounded = error.is_a?(Error) ? error : Error.new("#{error.class}: #{error.message}".scrub.byteslice(0, 4096).scrub(""))
+      prefix = error.is_a?(Error) ? "" : "#{error.class}: "
+      message = "#{prefix}#{error.message}".scrub.byteslice(0, 4096).scrub("")
+      bounded = error.is_a?(Error) && error.message.bytesize <= 4096 ? error : Error.new(message)
       @lock.synchronize do
         @errors << bounded
         @errors.shift if @errors.length > MAX_ERRORS

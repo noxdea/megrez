@@ -15,9 +15,9 @@ gem "megrez"
 ```ruby
 require "megrez"
 
-session = Megrez::Session.stdio(command: ["rdbg", "--open=vscode", "app.rb"])
+session = Megrez::Session.stdio(command: ["path/to/debug-adapter", "--stdio"])
 session.on(:stopped) { |event| puts "stopped: #{event.fetch("reason")}" }
-session.start(adapter_id: "rdbg")
+session.start(adapter_id: "my-adapter")
 session.launch("program" => File.expand_path("app.rb"))
 session.set_breakpoints("app.rb", [
   Megrez::SourceBreakpoint.new(

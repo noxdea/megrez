@@ -123,6 +123,21 @@ class SessionTest < Minitest::Test
     session&.close
   end
 
+  def test_rejected_transition_restores_the_previous_state
+    failed_launch = lambda do |_arguments, request|
+      [{"seq" => 901, "type" => "response", "request_seq" => request["seq"], "success" => false,
+        "command" => "launch", "message" => "invalid configuration"}]
+    end
+    adapter = Megrez::Testing::FakeAdapter.new(responses: {"launch" => failed_launch})
+    session, = session_for(adapter)
+    session.start(adapter_id: "fake")
+
+    assert_raises(Megrez::AdapterError) { session.launch({}).await(timeout: 1) }
+    assert_equal :initialized, session.state
+  ensure
+    session&.close
+  end
+
   def test_adapter_reverse_requests_are_answered
     session, adapter = session_for
     received = []
