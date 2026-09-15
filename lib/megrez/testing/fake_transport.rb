@@ -2,7 +2,7 @@
 
 module Megrez
   module Testing
-    class FakeTransport
+    class FakeTransport < Transport
       STOP = Object.new.freeze
       private_constant :STOP
 

@@ -75,10 +75,13 @@ class SessionTest < Minitest::Test
     adapter.emit("output", "category" => "stdout", "output" => "one")
     adapter.emit("stopped", "reason" => "pause", "threadId" => 1)
     adapter.emit("output", "category" => "stdout", "output" => "two")
-    wait_until { events.length == 5 }
-    assert_equal %i[continued stopped continued output stopped], events.map(&:first)
-    assert session.pause(1).await(timeout: 1) if session.state == :running
-    assert_raises(Megrez::Error) { session.step_in(1, target_id: 2) } unless session.state == :stopped
+    wait_until { events.length >= 6 }
+    assert_equal %i[continued stopped continued output stopped output], events.map(&:first)
+    assert_raises(Megrez::Error) { session.pause(1) }
+    session.continue(1).await(timeout: 1)
+    wait_until { session.state == :running }
+    session.pause(1).await(timeout: 1)
+    wait_until { session.state == :stopped }
   ensure
     session&.close
   end
