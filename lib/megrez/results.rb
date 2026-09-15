@@ -103,7 +103,7 @@ module Megrez
     def encode_reference(value, generation)
       value = Protocol.uint(value, "variablesReference")
       return 0 if value.zero?
-      raise Error, "variablesReference is too large" if value > 0xffff_ffff
+      raise Error, "variablesReference is too large" if value > 0x7fff_ffff
 
       (generation << 32) | value
     end

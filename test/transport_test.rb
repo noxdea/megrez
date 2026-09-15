@@ -38,6 +38,7 @@ class TransportTest < Minitest::Test
 
     huge = {seq: 1, type: "event", event: "output", body: {output: "x" * (33 << 20)}}
     assert_raises(Megrez::Error) { Megrez::Transport.frame(huge) }
+    assert_raises(Megrez::Error) { Megrez::Results.encode_reference(0x8000_0000, 1) }
   end
 
   def test_stdio_transport_uses_an_argument_array

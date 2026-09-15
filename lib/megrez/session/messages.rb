@@ -10,8 +10,9 @@ module Megrez
         next if @closing
 
         sequence = next_sequence
+        @ignored_responses[request_id] = true
         @ignored_responses[sequence] = true
-        @ignored_responses.shift if @ignored_responses.length > MAX_PENDING
+        @ignored_responses.shift while @ignored_responses.length > MAX_PENDING * 2
         {seq: sequence, type: "request", command: "cancel", arguments: {requestId: request_id}}
       end
       @transport.write(message) if message
@@ -28,7 +29,11 @@ module Megrez
     def enqueue(message, error)
       return if @lock.synchronize { @closing }
 
+      return process_message(message, error) if error || message["type"] == "response"
+
       @inbound << [message, error]
+    rescue StandardError => failure
+      record_error(failure)
     end
 
     def dispatch_messages
@@ -40,6 +45,8 @@ module Megrez
         begin
           @dispatch.call do
             begin
+              next if @lock.synchronize { @closing }
+
               process_message(*item)
             rescue StandardError => error
               record_error(error)
@@ -105,8 +112,9 @@ module Megrez
         when :terminated, :exited
           @generation += 1
           @state = :terminated
+          @ended = true
         end
-        @handlers[key].dup
+        (@handlers[key] || []).dup
       end
       handlers.each do |handler|
         handler.call(body)
@@ -149,6 +157,7 @@ module Megrez
         next [] if @closing
 
         @state = :terminated
+        @ended = true
         @generation += 1
         values = @pending.values.map(&:future)
         @pending.clear

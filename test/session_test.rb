@@ -35,6 +35,36 @@ class SessionTest < Minitest::Test
     session&.close
   end
 
+  def test_launch_response_may_wait_for_configuration_done
+    launch_request = nil
+    adapter = Megrez::Testing::FakeAdapter.new(responses: {
+      "launch" => lambda do |_arguments, request|
+        launch_request = request
+        [{"seq" => 800, "type" => "event", "event" => "initialized", "body" => {}}]
+      end,
+      "configurationDone" => lambda do |_arguments, request|
+        [
+          {"seq" => 801, "type" => "response", "request_seq" => request["seq"],
+           "success" => true, "command" => "configurationDone", "body" => {}},
+          {"seq" => 802, "type" => "response", "request_seq" => launch_request["seq"],
+           "success" => true, "command" => "launch", "body" => {}}
+        ]
+      end
+    })
+    session, = session_for(adapter)
+    initialized = Queue.new
+    session.on(:initialized) { initialized << true }
+    session.start(adapter_id: "fake")
+
+    launch = session.launch("program" => "app.rb")
+    wait_until { !initialized.empty? }
+    refute launch.done?
+    assert_equal({}, session.configuration_done.await(timeout: 1))
+    assert_equal({}, launch.await(timeout: 1))
+  ensure
+    session&.close
+  end
+
   def test_stack_variables_evaluation_and_stale_generation
     session, adapter = stopped_session(variable_count: 3)
 
@@ -98,6 +128,108 @@ class SessionTest < Minitest::Test
     timed = session.request("never")
     assert_raises(Megrez::Timeout) { timed.await(timeout: 0.001) }
     wait_until { adapter.messages.count { |message| message["command"] == "cancel" } == 2 }
+
+    request = adapter.messages.find { |message| message["command"] == "never" }
+    session.send(:enqueue, {
+      "seq" => 999, "type" => "response", "request_seq" => request["seq"],
+      "success" => true, "command" => "never", "body" => {}
+    }, nil)
+    assert_empty session.errors
+  ensure
+    session&.close
+  end
+
+  def test_event_handler_can_await_a_follow_up_request
+    session, adapter = stopped_session
+    result = Queue.new
+    session.on(:stopped) do
+      frame = session.stack_trace(1).await(timeout: 1).first
+      result << frame.name
+    end
+
+    adapter.emit("stopped", "reason" => "step", "threadId" => 1)
+
+    wait_until { !result.empty? }
+    assert_equal "main", result.pop
+  ensure
+    session&.close
+  end
+
+  def test_queued_event_is_ignored_after_close
+    callbacks = Queue.new
+    session, adapter = session_for(dispatch: ->(&block) { callbacks << block })
+    called = false
+    session.on(:stopped) { called = true }
+    adapter.emit("stopped", "reason" => "pause", "threadId" => 1)
+    wait_until { !callbacks.empty? }
+
+    session.close
+    callbacks.pop.call
+
+    assert_equal :terminated, session.state
+    refute called
+  ensure
+    session&.close
+  end
+
+  def test_unhandled_event_names_are_not_retained
+    session, adapter = session_for
+    received = Queue.new
+    session.on(:marker) { received << true }
+    100.times { |index| adapter.emit("unknown#{index}") }
+    adapter.emit("marker")
+    wait_until { !received.empty? }
+
+    assert_equal [:marker], session.instance_variable_get(:@handlers).keys
+  ensure
+    session&.close
+  end
+
+  def test_close_during_a_write_still_reports_a_session_error
+    entered = Queue.new
+    release = Queue.new
+    transport_class = Class.new do
+      define_method(:initialize) do |entered_queue, release_queue|
+        @entered = entered_queue
+        @release = release_queue
+      end
+      define_method(:listen) { |&_receive| self }
+      define_method(:write) do |_message|
+        @entered << true
+        @release.pop
+        raise Megrez::Error, "write failed"
+      end
+      define_method(:close) { @release << true }
+    end
+    session = Megrez::Session.new(transport_class.new(entered, release))
+    failure = Queue.new
+    worker = Thread.new do
+      session.start(adapter_id: "fake")
+    rescue StandardError => error
+      failure << error
+    end
+    entered.pop
+
+    session.close
+    worker.join
+
+    assert_kind_of Megrez::Error, failure.pop
+  ensure
+    session&.close
+    worker&.kill
+    worker&.join
+  end
+
+  def test_close_does_not_restore_a_pending_disconnect_state
+    adapter = Megrez::Testing::FakeAdapter.new(responses: {"disconnect" => ->(*) { [] }})
+    session, = session_for(adapter)
+    session.start(adapter_id: "fake")
+    disconnect = session.disconnect
+
+    session.close
+
+    assert_equal :terminated, session.state
+    assert_raises(Megrez::Error) { disconnect.await }
   ensure
     session&.close
   end
@@ -149,6 +281,10 @@ class SessionTest < Minitest::Test
       {accepted: true}
     end
     session.start(adapter_id: "fake")
+
+    initialize_request = adapter.messages.find { |message| message["command"] == "initialize" }
+    assert initialize_request.dig("arguments", "supportsStartDebuggingRequest")
+    refute initialize_request.dig("arguments", "supportsRunInTerminalRequest")
 
     request = adapter.request_client("startDebugging", "configuration" => {"name" => "child"})
     wait_until do

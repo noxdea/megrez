@@ -29,7 +29,7 @@ module Megrez
       @lock = Mutex.new
       @pending = {}
       @ignored_responses = {}
-      @handlers = Hash.new { |hash, key| hash[key] = [] }
+      @handlers = {}
       @request_handlers = {}
       @errors = []
       @sequence = 0
@@ -37,6 +37,7 @@ module Megrez
       @state = :initialized
       @started = false
       @closing = false
+      @ended = false
       @capabilities = {}.freeze
       @inbound = SizedQueue.new(MAX_INBOUND)
       @dispatcher = Thread.new { dispatch_messages }
@@ -54,12 +55,13 @@ module Megrez
       Protocol.boolean(columns_start_at_1, "columns_start_at_1")
       raise ArgumentError, "path_format must be path or uri" unless %w[path uri].include?(path_format)
 
-      @lock.synchronize do
+      reverse_requests = @lock.synchronize do
         raise Error, "debug session already started" if @started
         raise Error, "debug session is closed" if @closing
 
         @started = true
         started_now = true
+        @request_handlers.keys
       end
       arguments = {
         clientID: "megrez",
@@ -71,8 +73,8 @@ module Megrez
         supportsVariableType: true,
         supportsVariablePaging: true,
         supportsProgressReporting: true,
-        supportsRunInTerminalRequest: true,
-        supportsStartDebuggingRequest: true
+        supportsRunInTerminalRequest: reverse_requests.include?("runInTerminal"),
+        supportsStartDebuggingRequest: reverse_requests.include?("startDebugging")
       }
       future = send_request("initialize", arguments, states: [:initialized], allow_unstarted: true) do |body|
         Results.capabilities(body)
@@ -93,7 +95,7 @@ module Megrez
       raise ArgumentError, "handler required" unless handler
 
       key = event_key(event)
-      @lock.synchronize { @handlers[key] << handler }
+      @lock.synchronize { (@handlers[key] ||= []) << handler }
       handler
     end
 
@@ -160,6 +162,7 @@ module Megrez
       if pending
         @lock.synchronize { @pending.delete(pending.first) }
         pending.last.future.fulfill(error: error)
+        pending.last.future
       else
         raise
       end
@@ -177,11 +180,15 @@ module Megrez
       end
       future = send_request(command, arguments, states: [to], &validate)
       future.then do |_value, error|
-        @lock.synchronize { @state = previous if error && @state == to }
+        @lock.synchronize do
+          @state = previous if error && !@closing && !@ended && @state == to
+        end
       end
       future
     rescue StandardError
-      @lock.synchronize { @state = previous if previous && @state == to }
+      @lock.synchronize do
+        @state = previous if previous && !@closing && !@ended && @state == to
+      end
       raise
     end
 

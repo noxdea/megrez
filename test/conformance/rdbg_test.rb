@@ -22,22 +22,28 @@ class RdbgConformanceTest < Minitest::Test
         )
       end
       session = connect(port, pid, log)
+      initialized = Queue.new
       stopped = Queue.new
+      session.on(:initialized) { initialized << true }
       session.on(:stopped) { |event| stopped << event }
 
       session.start(adapter_id: "rdbg", timeout: 5)
-      session.launch("localfs" => true).await(timeout: 5)
+      launch = session.launch("localfs" => true)
+      wait_until(timeout: 5) { !initialized.empty? }
       breakpoint = Megrez::SourceBreakpoint.new(
         line: 2, column: nil, condition: nil, hit_condition: nil, log_message: nil
       )
       assert session.set_breakpoints(program, [breakpoint]).await(timeout: 5).first.verified
       session.configuration_done.await(timeout: 5)
+      launch.await(timeout: 5)
+      wait_until(timeout: 5) { !stopped.empty? }
       assert stopped.pop.fetch("threadId")
 
       frame = session.stack_trace(1).await(timeout: 5).first
       scope = session.scopes(frame.id).await(timeout: 5).first
       assert session.variables(scope.variables_reference).await(timeout: 5).any? { |variable| variable.name == "value" }
       session.step_over(1).await(timeout: 5)
+      wait_until(timeout: 5) { !stopped.empty? }
       assert stopped.pop.fetch("threadId")
       session.continue(1).await(timeout: 5)
       wait_until(timeout: 5) { session.state == :terminated }
@@ -74,9 +80,23 @@ class RdbgConformanceTest < Minitest::Test
     return unless pid
     return if Process.waitpid(pid, Process::WNOHANG)
 
-    Process.kill("TERM", pid)
+    begin
+      Process.kill("TERM", pid)
+    rescue Errno::ESRCH
+      nil
+    end
+    20.times do
+      return if Process.waitpid(pid, Process::WNOHANG)
+
+      sleep 0.05
+    end
+    begin
+      Process.kill("KILL", pid)
+    rescue Errno::ESRCH
+      nil
+    end
     Process.wait(pid)
-  rescue Errno::ESRCH, Errno::ECHILD
+  rescue Errno::ECHILD
     nil
   end
 end

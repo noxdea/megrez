@@ -52,7 +52,7 @@ module Megrez
 
       normalized = JSON.parse(JSON.generate(message))
       Protocol.validate_message(normalized)
-      body = JSON.generate(message).b
+      body = JSON.generate(normalized).b
       raise Error, "oversized DAP message" unless body.bytesize.between?(1, MAX_MESSAGE)
 
       "Content-Length: #{body.bytesize}\r\n\r\n".b + body

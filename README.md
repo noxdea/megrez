@@ -17,15 +17,19 @@ require "megrez"
 
 session = Megrez::Session.stdio(command: ["path/to/debug-adapter", "--stdio"])
 session.on(:stopped) { |event| puts "stopped: #{event.fetch("reason")}" }
+initialized = Queue.new
+session.on(:initialized) { initialized << true }
 session.start(adapter_id: "my-adapter")
-session.launch("program" => File.expand_path("app.rb"))
+launch = session.launch("program" => File.expand_path("app.rb"))
+initialized.pop
 session.set_breakpoints("app.rb", [
   Megrez::SourceBreakpoint.new(
     line: 12, column: nil, condition: nil, hit_condition: nil,
     log_message: nil
   )
-])
-session.configuration_done
+]).await(timeout: 5)
+session.configuration_done.await(timeout: 5)
+launch.await(timeout: 5)
 ```
 
 Requests return `Megrez::Future`; call `await(timeout:)` where a blocking
@@ -39,6 +43,9 @@ with `on_request`:
 ```ruby
 session.on_request("startDebugging") { |arguments| start_child(arguments) }
 ```
+
+Register reverse-request handlers before `start`; Megrez advertises only the
+requests that have handlers.
 
 Values returned as `variables_reference` embed the current stop generation.
 Passing a value from an earlier stop to `variables` or `set_variable` raises
