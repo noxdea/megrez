@@ -105,6 +105,11 @@ module Megrez
       return unless threads
 
       begin
+        begin
+          @output.shutdown(Socket::SHUT_RDWR) if @output.is_a?(BasicSocket)
+        rescue IOError, SystemCallError
+          nil
+        end
         @output.close unless @output.closed?
         stop_process
       ensure
