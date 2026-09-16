@@ -158,8 +158,10 @@ module Megrez
       return unless @process
       return if @process.join(1)
 
-      Process.kill("TERM", @process.pid)
-      return if @process.join(1)
+      unless Gem.win_platform?
+        Process.kill("TERM", @process.pid)
+        return if @process.join(1)
+      end
 
       Process.kill("KILL", @process.pid)
       @process.join(1)

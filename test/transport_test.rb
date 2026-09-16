@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "test_helper"
+require "minitest/mock"
 
 class TransportTest < Minitest::Test
   def test_frame_round_trip
@@ -80,5 +81,41 @@ class TransportTest < Minitest::Test
     assert_raises(ArgumentError) { Megrez::Transport.stdio(command: ["ruby"], env: {"BAD=KEY" => "x"}) }
     assert_raises(ArgumentError) { Megrez::Transport.tcp(host: "", port: 1) }
     assert_raises(ArgumentError) { Megrez::Transport.tcp(host: "localhost", port: 0) }
+  end
+
+  def test_windows_process_shutdown_skips_unsupported_term_signal
+    process = Struct.new(:pid, :joins) do
+      def join(_timeout) = joins.shift
+    end.new(123, [false, true])
+    transport = Megrez::Transport.allocate
+    transport.instance_variable_set(:@process, process)
+    signals = []
+
+    Gem.stub(:win_platform?, true) do
+      Process.stub(:kill, ->(signal, pid) { signals << [signal, pid] }) do
+        transport.send(:stop_process)
+      end
+    end
+
+    assert_equal [["KILL", 123]], signals
+    assert_empty process.joins
+  end
+
+  def test_unix_process_shutdown_keeps_term_then_kill_fallback
+    process = Struct.new(:pid, :joins) do
+      def join(_timeout) = joins.shift
+    end.new(456, [false, false, true])
+    transport = Megrez::Transport.allocate
+    transport.instance_variable_set(:@process, process)
+    signals = []
+
+    Gem.stub(:win_platform?, false) do
+      Process.stub(:kill, ->(signal, pid) { signals << [signal, pid] }) do
+        transport.send(:stop_process)
+      end
+    end
+
+    assert_equal [["TERM", 456], ["KILL", 456]], signals
+    assert_empty process.joins
   end
 end
