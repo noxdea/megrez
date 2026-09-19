@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#060a13">
+  <meta name="description" content="Megrez is a pure Ruby Debug Adapter Protocol client.">
+  <title>Megrez — A Debug Adapter Protocol client for Ruby</title>
+  <link rel="stylesheet" href="site.css">
+</head>
+<body style="--accent:#ffb86b">
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header">
+    <a class="brand" href="#"><span class="star-mark"></span>Megrez</a>
+    <nav aria-label="Primary navigation"><a href="#features">Capabilities</a><a href="#install">Install</a><a href="https://github.com/noxdea/megrez">GitHub</a></nav>
+  </header>
+  <main id="main">
+    <section class="hero">
+      <div>
+        <p class="constellation">δ Ursae Majoris · debugging</p>
+        <h1>Hold the program still.</h1>
+        <p class="lede">A pure Ruby DAP client for adapter transport, breakpoints, execution control, and lazy variable inspection—without an editor attached.</p>
+        <div class="actions"><a class="button primary" href="#install">Install Megrez</a><a class="button" href="https://github.com/noxdea/megrez">View source</a></div>
+        <ul class="facts"><li><strong>stdio + TCP</strong></li><li>Ruby ≥ 3.1</li><li>MIT licensed</li></ul>
+      </div>
+      <div class="instrument" aria-label="Debug adapter session example">
+        <div class="instrument-head"><span>debug / session 01</span><span class="signal">stopped</span></div>
+        <div class="instrument-body">
+          <p class="command"><b>breakpoint</b> app.rb:12 · reason: breakpoint</p>
+          <div class="rows">
+            <div class="row"><span><strong>render_report</strong><br><small>app.rb:12</small></span><span class="tag">frame 2</span></div>
+            <div class="row"><span><strong>each</strong><br><small>report.rb:48</small></span><span class="tag">frame 1</span></div>
+            <div class="row"><span><strong>&lt;main&gt;</strong><br><small>app.rb:26</small></span><span class="tag">frame 0</span></div>
+          </div>
+          <p class="command" style="margin-top:1.25rem"><b>variables</b> report → { rows: 12, status: "ready" }</p>
+        </div>
+      </div>
+    </section>
+    <section class="features" id="features">
+      <div class="section-heading"><h2>One session, ordered.</h2><p>Megrez owns the protocol state machine so a host can focus on its debugging experience. Requests remain cancellable and events arrive in adapter order.</p></div>
+      <div class="feature-grid">
+        <article><h3>Full execution control</h3><p>Launch, attach, break, continue, step, pause, evaluate, and inspect through one Ruby API.</p></article>
+        <article><h3>Safe references</h3><p>Stop generations reject stale variable references before they can query invalid debugger state.</p></article>
+        <article><h3>Adapter-ready</h3><p>Use stdio or TCP, handle reverse requests, and test locally with the bundled fake adapter.</p></article>
+      </div>
+    </section>
+    <section class="install" id="install">
+      <div class="install-copy"><h2>Open a session.</h2><p>Start any DAP-compatible adapter and wait only where your application needs to.</p></div>
+      <div class="terminal"><div class="terminal-bar">Ruby</div><pre><span class="prompt">$</span> bundle add megrez
+
+session = Megrez::Session.stdio(
+  command: ["adapter", "--stdio"]
+)
+session.start(adapter_id: "ruby")
+session.launch("program" => "app.rb")</pre></div>
+    </section>
+  </main>
+  <footer><p>Megrez · Pure Ruby · MIT</p><div><a href="https://rubygems.org/gems/megrez">RubyGems</a><a href="https://github.com/noxdea/megrez">GitHub</a></div></footer>
+</body>
+</html>
